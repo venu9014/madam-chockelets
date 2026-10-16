@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-gold: #C6A45B;
+  --color-violet: #6F4A91;
+  --color-blush: #EAD0E0;
+  --color-plum: #21182A;
+  --color-cream: #FFF9F2;
+  --color-cocoa: #4A2926;
+  --color-muted: #766D78;
+}
+
+body {
+  color: #4A2926;
+  background-color: #FFF9F2;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Luxury Editorial Headings */
+h1, h2, h3, .font-editorial {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FFF9F2;
+}
+::-webkit-scrollbar-thumb {
+  background: #EAD0E0;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C6A45B;
+}

@@ -1,0 +1,594 @@
+// Madam Chocolate Operations Platform - Database Schema
+// Optimized for strict relational integrity, historical traceability, and deterministic auditing
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------
+// USER & ACCESS MANAGEMENT
+// -------------------------------------------------------------
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         String    // OWNER, BRANCH_MANAGER, EMPLOYEE, AUDITOR
+  phone        String?
+  avatarUrl    String?
+  active       Boolean   @default(true)
+  isDemoUser   Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee             Employee?
+  submittedTasks       TaskSubmission[]
+  reviewedTasks        TaskReview[]
+  attendanceReviews    AttendanceException[] @relation("ExceptionReviewer")
+  initiatedTransfers   StockTransfer[]    @relation("TransferInitiator")
+  receivedTransfers    StockTransfer[]    @relation("TransferReceiver")
+  conductedCounts      StockCountSession[] @relation("SessionConductor")
+  reviewedCounts       StockCountSession[] @relation("SessionReviewer")
+  requestedAdjustments StockAdjustmentRequest[] @relation("AdjustmentRequester")
+  approvedAdjustments  StockAdjustmentRequest[] @relation("AdjustmentApprover")
+  auditEvents          AuditEvent[]
+  notifications        Notification[]
+  importJobs           ImportJob[]
+
+  @@index([role])
+  @@index([email])
+}
+
+model Branch {
+  id                   String    @id @default(cuid())
+  code                 String    @unique // e.g., IND, KOR, WHF
+  name                 String
+  address              String
+  city                 String    @default("Bengaluru")
+  state                String    @default("Karnataka")
+  postalCode           String
+  latitude             Float
+  longitude            Float
+  geofenceRadiusMeters Float     @default(150.0) // 150m standard geofence boundary
+  active               Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  employees            Employee[]
+  tasks                Task[]
+  attendanceEvents     AttendanceEvent[]
+  attendanceExceptions AttendanceException[]
+  inventoryMovements   InventoryMovement[]
+  sourceTransfers      StockTransfer[]    @relation("SourceBranch")
+  targetTransfers      StockTransfer[]    @relation("TargetBranch")
+  stockCountSessions   StockCountSession[]
+  discrepancies        ReconciliationDiscrepancy[]
+  adjustmentRequests   StockAdjustmentRequest[]
+  notifications        Notification[]
+
+  @@index([code])
+}
+
+model Employee {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  branchId         String
+  employeeCode     String    @unique // e.g. MC-IND-001
+  designation      String
+  joinedDate       DateTime
+  emergencyContact String?
+  active           Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch           Branch    @relation(fields: [branchId], references: [id])
+  tasks            Task[]
+  attendanceEvents AttendanceEvent[]
+  attendanceExceptions AttendanceException[]
+
+  @@index([branchId])
+  @@index([employeeCode])
+}
+
+// -------------------------------------------------------------
+// STANDARD OPERATING PROCEDURES (SOPs) & VERSIONS
+// -------------------------------------------------------------
+
+model Sop {
+  id          String       @id @default(cuid())
+  code        String       @unique // e.g., SOP-OPEN-01
+  title       String
+  category    String       // OPENING, CLOSING, HYGIENE, INVENTORY, QUALITY
+  description String
+  frequency   String       // DAILY, WEEKLY, MONTHLY, AD_HOC
+  roleTarget  String       // ALL, EMPLOYEE, BRANCH_MANAGER
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  versions    SopVersion[]
+
+  @@index([code])
+  @@index([category])
+}
+
+model SopVersion {
+  id             String               @id @default(cuid())
+  sopId          String
+  versionNumber  Int                  @default(1)
+  title          String
+  description    String
+  instructions   String
+  frequency      String               @default("DAILY")
+  deadlineTime   String               @default("10:00") // 24-hr format (Asia/Kolkata)
+  effectiveFrom  DateTime             @default(now())
+  effectiveTo    DateTime?
+  status         String               @default("PUBLISHED") // DRAFT, PUBLISHED, ARCHIVED
+  publishedById  String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  sop            Sop                  @relation(fields: [sopId], references: [id], onDelete: Cascade)
+  checklistItems SopChecklistItem[]
+  tasks          Task[]
+
+  @@unique([sopId, versionNumber])
+  @@index([sopId])
+  @@index([status])
+}
+
+model SopChecklistItem {
+  id               String      @id @default(cuid())
+  sopVersionId     String
+  sequence         Int
+  title            String
+  description      String?
+  isRequired       Boolean     @default(true)
+  evidenceRequired String      @default("NONE") // NONE, PHOTO, SIGNATURE, NUMERIC_VALUE
+  minNumericVal    Float?
+  maxNumericVal    Float?
+  unit             String?
+
+  sopVersion       SopVersion  @relation(fields: [sopVersionId], references: [id], onDelete: Cascade)
+  answers          TaskChecklistAnswer[]
+
+  @@index([sopVersionId, sequence])
+}
+
+// -------------------------------------------------------------
+// TASK MANAGEMENT & SUBMISSIONS
+// -------------------------------------------------------------
+
+model Task {
+  id                 String           @id @default(cuid())
+  sopVersionId       String
+  branchId           String
+  assignedEmployeeId String?
+  assignedRole       String           @default("EMPLOYEE")
+  title              String
+  dueDate            DateTime
+  dueTime            String           @default("10:00")
+  status             String           @default("PENDING") // PENDING, IN_PROGRESS, SUBMITTED, CHANGES_REQUESTED, APPROVED, REJECTED, OVERDUE, CANCELLED
+  priority           String           @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  sopVersion         SopVersion       @relation(fields: [sopVersionId], references: [id])
+  branch             Branch           @relation(fields: [branchId], references: [id])
+  assignedEmployee   Employee?        @relation(fields: [assignedEmployeeId], references: [id])
+  submissions        TaskSubmission[]
+  reviews            TaskReview[]
+  evidence           EvidenceAttachment[]
+
+  @@index([branchId, dueDate])
+  @@index([status])
+  @@index([assignedEmployeeId])
+}
+
+model TaskSubmission {
+  id             String                @id @default(cuid())
+  taskId         String
+  submittedById  String
+  notes          String?
+  submissionSeq  Int                   @default(1)
+  submittedAt    DateTime              @default(now())
+
+  task           Task                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  submittedBy    User                  @relation(fields: [submittedById], references: [id])
+  answers        TaskChecklistAnswer[]
+  reviews        TaskReview[]
+  evidence       EvidenceAttachment[]
+
+  @@index([taskId])
+}
+
+model TaskChecklistAnswer {
+  id               String           @id @default(cuid())
+  taskSubmissionId String
+  checklistItemId  String
+  isChecked        Boolean          @default(false)
+  valueText        String?
+  valueNumber      Float?
+  evidenceUrl      String?
+  notes            String?
+
+  taskSubmission   TaskSubmission   @relation(fields: [taskSubmissionId], references: [id], onDelete: Cascade)
+  checklistItem    SopChecklistItem @relation(fields: [checklistItemId], references: [id])
+
+  @@index([taskSubmissionId])
+}
+
+model TaskReview {
+  id               String          @id @default(cuid())
+  taskId           String
+  taskSubmissionId String
+  reviewerId       String
+  status           String          // APPROVED, REJECTED, CHANGES_REQUESTED
+  comments         String?
+  reviewedAt       DateTime        @default(now())
+
+  task             Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskSubmission   TaskSubmission  @relation(fields: [taskSubmissionId], references: [id], onDelete: Cascade)
+  reviewer         User            @relation(fields: [reviewerId], references: [id])
+
+  @@index([taskId])
+  @@index([taskSubmissionId])
+}
+
+model EvidenceAttachment {
+  id                String          @id @default(cuid())
+  taskId            String
+  taskSubmissionId  String?
+  fileUrl           String
+  fileName          String
+  fileType          String          @default("image/jpeg")
+  fileSize          Int             @default(1024)
+  caption           String?
+  isDemoPlaceholder Boolean         @default(true)
+  uploadedAt        DateTime        @default(now())
+
+  task              Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskSubmission    TaskSubmission? @relation(fields: [taskSubmissionId], references: [id])
+
+  @@index([taskId])
+}
+
+// -------------------------------------------------------------
+// ATTENDANCE & GEOFENCING
+// -------------------------------------------------------------
+
+model AttendanceEvent {
+  id                       String               @id @default(cuid())
+  employeeId               String
+  branchId                 String
+  eventType                String               // CHECK_IN, CHECK_OUT
+  timestamp                DateTime             @default(now())
+  latitude                 Float?
+  longitude                Float?
+  distanceFromBranchMeters Float?
+  isWithinGeofence         Boolean              @default(false)
+  accuracyMeters           Float?
+  deviceDetails            String?
+  status                   String               @default("VERIFIED") // VERIFIED, FLAGGED, PENDING_EXCEPTION, REJECTED
+  notes                    String?
+  isSimulated              Boolean              @default(true)
+  simulationScenario       String?
+
+  employee                 Employee             @relation(fields: [employeeId], references: [id])
+  branch                   Branch               @relation(fields: [branchId], references: [id])
+  exception                AttendanceException?
+
+  @@index([employeeId, timestamp])
+  @@index([branchId, timestamp])
+  @@index([status])
+}
+
+model AttendanceException {
+  id                String          @id @default(cuid())
+  attendanceEventId String          @unique
+  employeeId        String
+  branchId          String
+  reason            String
+  status            String          @default("PENDING") // PENDING, APPROVED, REJECTED
+  reviewerId        String?
+  reviewerNotes     String?
+  resolvedAt        DateTime?
+  createdAt         DateTime        @default(now())
+
+  attendanceEvent   AttendanceEvent @relation(fields: [attendanceEventId], references: [id], onDelete: Cascade)
+  employee          Employee        @relation(fields: [employeeId], references: [id])
+  branch            Branch          @relation(fields: [branchId], references: [id])
+  reviewer          User?           @relation("ExceptionReviewer", fields: [reviewerId], references: [id])
+
+  @@index([branchId, status])
+  @@index([status])
+}
+
+// -------------------------------------------------------------
+// PRODUCTS, INVENTORY & MOVEMENTS
+// -------------------------------------------------------------
+
+model Product {
+  id                String              @id @default(cuid())
+  sku               String              @unique // e.g. MC-DRK-70
+  name              String
+  category          String              // BARS, PRALINES, TRUFFLES, GIFT_BOXES, BAKERY, PANTRY
+  description       String
+  unitOfMeasure     String              @default("PIECE") // PIECE, BOX, PACK, KG
+  costPrice         Float               // In INR (₹)
+  sellingPrice      Float               // In INR (₹)
+  minStockThreshold Int                 @default(10)
+  active            Boolean             @default(true)
+  imageUrl          String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  movements         InventoryMovement[]
+  transferItems     StockTransferItem[]
+  countItems        StockCountItem[]
+  discrepancies     ReconciliationDiscrepancy[]
+  adjustments       StockAdjustmentRequest[]
+
+  @@index([sku])
+  @@index([category])
+}
+
+model InventoryMovement {
+  id              String                  @id @default(cuid())
+  productId       String
+  branchId        String
+  movementType    String                  // OPENING_STOCK, PURCHASE, TRANSFER_IN, TRANSFER_OUT, SALE, RETURN, WASTAGE, DAMAGED, COMPLIMENTARY, ADJUSTMENT
+  quantity        Int                     // Positive or negative based on movement type
+  unitCost        Float                   // Unit cost at movement time in INR
+  referenceNumber String                  // Invoice, Transfer #, Count Session #, Adjustment #
+  transferId      String?
+  notes           String?
+  actorId         String?
+  effectiveDate   DateTime                @default(now())
+  createdAt       DateTime                @default(now())
+
+  product         Product                 @relation(fields: [productId], references: [id])
+  branch          Branch                  @relation(fields: [branchId], references: [id])
+  adjustments     StockAdjustmentRequest[]
+
+  @@index([productId, branchId, effectiveDate])
+  @@index([branchId, effectiveDate])
+  @@index([movementType])
+  @@index([referenceNumber])
+}
+
+model StockTransfer {
+  id             String              @id @default(cuid())
+  transferNumber String              @unique // e.g. TR-2026-001
+  sourceBranchId String
+  targetBranchId String
+  status         String              @default("INITIATED") // INITIATED, IN_TRANSIT, RECEIVED, CANCELLED
+  notes          String?
+  initiatedById  String
+  receivedById   String?
+  initiatedAt    DateTime            @default(now())
+  receivedAt     DateTime?
+  createdAt      DateTime            @default(now())
+
+  sourceBranch   Branch              @relation("SourceBranch", fields: [sourceBranchId], references: [id])
+  targetBranch   Branch              @relation("TargetBranch", fields: [targetBranchId], references: [id])
+  initiatedBy    User                @relation("TransferInitiator", fields: [initiatedById], references: [id])
+  receivedBy     User?               @relation("TransferReceiver", fields: [receivedById], references: [id])
+  items          StockTransferItem[]
+
+  @@index([transferNumber])
+  @@index([sourceBranchId])
+  @@index([targetBranchId])
+  @@index([status])
+}
+
+model StockTransferItem {
+  id              String        @id @default(cuid())
+  stockTransferId String
+  productId       String
+  quantity        Int
+  unitCost        Float
+
+  stockTransfer   StockTransfer @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
+  product         Product       @relation(fields: [productId], references: [id])
+
+  @@index([stockTransferId])
+}
+
+// -------------------------------------------------------------
+// STOCK COUNTS & RECONCILIATION
+// -------------------------------------------------------------
+
+model StockCountSession {
+  id            String           @id @default(cuid())
+  sessionNumber String           @unique // e.g. STK-IND-20261016
+  branchId      String
+  countDate     DateTime
+  cutoffTime    String           @default("22:00")
+  status        String           @default("PLANNED") // PLANNED, IN_PROGRESS, COMPLETED, RECONCILED
+  conductedById String
+  reviewedById  String?
+  notes         String?
+  completedAt   DateTime?
+  createdAt     DateTime         @default(now())
+
+  branch        Branch           @relation(fields: [branchId], references: [id])
+  conductedBy   User             @relation("SessionConductor", fields: [conductedById], references: [id])
+  reviewedBy    User?            @relation("SessionReviewer", fields: [reviewedById], references: [id])
+  items         StockCountItem[]
+
+  @@index([branchId, countDate])
+  @@index([status])
+}
+
+model StockCountItem {
+  id                  String                      @id @default(cuid())
+  stockCountSessionId String
+  productId           String
+  countedQuantity     Int
+  expectedQuantity    Int
+  varianceQuantity    Int                         // counted - expected
+  unitCost            Float
+  varianceValue       Float                       // varianceQuantity * unitCost
+  status              String                      @default("MATCH") // MATCH, DISCREPANCY, ADJUSTED, INVESTIGATION_PENDING
+  notes               String?
+
+  session             StockCountSession           @relation(fields: [stockCountSessionId], references: [id], onDelete: Cascade)
+  product             Product                     @relation(fields: [productId], references: [id])
+  discrepancy         ReconciliationDiscrepancy?
+
+  @@index([stockCountSessionId])
+  @@index([status])
+}
+
+model ReconciliationDiscrepancy {
+  id                 String                  @id @default(cuid())
+  countItemId        String                  @unique
+  branchId           String
+  productId          String
+  expectedQty        Int
+  countedQty         Int
+  varianceQty        Int
+  unitCost           Float
+  varianceValue      Float
+  scenarioType       String                  // PHYSICAL_LOWER, PHYSICAL_HIGHER, UNRECORDED_WASTAGE, DELAYED_SALES, PENDING_TRANSFER, INCORRECT_ENTRY, AWAITING_APPROVAL, RESOLVED_WITH_EVIDENCE, NEGATIVE_STOCK, INVESTIGATION_REQUIRED
+  status             String                  @default("DISCOVERED") // DISCOVERED, INVESTIGATING, ADJUSTMENT_REQUESTED, RESOLVED
+  rootCause          String?
+  investigationNotes String?
+  resolvedById       String?
+  resolvedAt         DateTime?
+  createdAt          DateTime                @default(now())
+
+  countItem          StockCountItem          @relation(fields: [countItemId], references: [id], onDelete: Cascade)
+  branch             Branch                  @relation(fields: [branchId], references: [id])
+  product            Product                 @relation(fields: [productId], references: [id])
+  adjustmentRequest  StockAdjustmentRequest?
+
+  @@index([branchId, status])
+  @@index([scenarioType])
+}
+
+model StockAdjustmentRequest {
+  id               String                     @id @default(cuid())
+  requestNumber    String                     @unique // e.g. ADJ-2026-001
+  discrepancyId    String?                    @unique
+  branchId         String
+  productId        String
+  proposedQuantity Int                        // Signed quantity to adjust
+  unitCost         Float
+  adjustmentValue  Float                      // proposedQuantity * unitCost
+  reason           String
+  status           String                     @default("PENDING") // PENDING, APPROVED, REJECTED
+  requestedById    String
+  approvedById     String?
+  approvalNotes    String?
+  approvedAt       DateTime?
+  movementId       String?
+  createdAt        DateTime                   @default(now())
+
+  discrepancy      ReconciliationDiscrepancy? @relation(fields: [discrepancyId], references: [id])
+  branch           Branch                     @relation(fields: [branchId], references: [id])
+  product          Product                    @relation(fields: [productId], references: [id])
+  requestedBy      User                       @relation("AdjustmentRequester", fields: [requestedById], references: [id])
+  approvedBy       User?                      @relation("AdjustmentApprover", fields: [approvedById], references: [id])
+  movement         InventoryMovement?         @relation(fields: [movementId], references: [id])
+
+  @@index([branchId, status])
+  @@index([status])
+}
+
+// -------------------------------------------------------------
+// NOTIFICATIONS & AUDIT TRAIL
+// -------------------------------------------------------------
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  branchId  String?
+  title     String
+  message   String
+  category  String   // TASK, ATTENDANCE, INVENTORY, DISCREPANCY, SYSTEM
+  type      String   @default("INFO") // INFO, WARNING, SUCCESS, URGENT
+  isRead    Boolean  @default(false)
+  linkUrl   String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([branchId])
+}
+
+model AuditEvent {
+  id           String   @id @default(cuid())
+  actorId      String?
+  actorName    String
+  actorRole    String
+  action       String   // USER_LOGIN, TASK_SUBMITTED, TASK_APPROVED, ATTENDANCE_CHECKIN, STOCK_ADJUSTED, etc.
+  entityType   String   // TASK, ATTENDANCE, INVENTORY, DISCREPANCY, SOP, SYSTEM
+  entityId     String?
+  branchId     String?
+  metadataJson String?
+  ipAddress    String   @default("127.0.0.1")
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  actor        User?    @relation(fields: [actorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// -------------------------------------------------------------
+// CSV IMPORT JOBS & ROW ERRORS
+// -------------------------------------------------------------
+
+model ImportJob {
+  id             String           @id @default(cuid())
+  jobType        String           // SALES_IMPORT, PHYSICAL_STOCK_IMPORT
+  fileName       String
+  fileSize       Int
+  status         String           @default("COMPLETED") // PREVIEW, PROCESSING, COMPLETED, FAILED
+  totalRows      Int              @default(0)
+  successfulRows Int              @default(0)
+  failedRows     Int              @default(0)
+  initiatedById  String
+  createdAt      DateTime         @default(now())
+  completedAt    DateTime?
+
+  initiatedBy    User             @relation(fields: [initiatedById], references: [id])
+  rowErrors      ImportRowError[]
+
+  @@index([jobType])
+}
+
+model ImportRowError {
+  id           String    @id @default(cuid())
+  importJobId  String
+  rowNumber    Int
+  rawDataJson  String
+  errorMessage String
+
+  importJob    ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@index([importJobId])
+}
+
+model AppConfig {
+  id          String   @id @default(cuid())
+  configKey   String   @unique
+  configValue String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@index([configKey])
+}
