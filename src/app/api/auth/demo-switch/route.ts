@@ -5,8 +5,8 @@ import { recordAuditEvent } from "@/lib/audit";
 
 export async function POST(req: NextRequest) {
   try {
-    // Strictly prevent demo account switching in production
-    if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEMO_MODE !== "true") {
+    // Strictly prevent demo account switching in production only if DEMO_MODE is explicitly disabled
+    if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_DEMO_MODE === "false") {
       return NextResponse.json(
         { error: "Demo switching is disabled in production." },
         { status: 403 }

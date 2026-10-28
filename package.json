@@ -5,8 +5,8 @@
   "description": "Madam Chocolate Digital Operations Platform - Centralized Multi-Branch Operations, Inventory, SOPs, and Attendance",
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/prepare-prisma.mjs && prisma generate && next build",
-    "vercel-build": "node scripts/prepare-prisma.mjs && prisma generate && next build",
+    "build": "node scripts/prepare-prisma.mjs && prisma generate && node scripts/auto-migrate.mjs && next build",
+    "vercel-build": "node scripts/prepare-prisma.mjs && prisma generate && node scripts/auto-migrate.mjs && next build",
     "start": "next start",
     "lint": "next lint",
     "prisma:generate": "prisma generate",
