@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useOutlet } from "@/context/OutletContext";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
   Scale,
@@ -44,6 +45,8 @@ interface Discrepancy {
 }
 
 export default function ReconciliationPage() {
+  const { selectedOutletCode, selectedOutletId, selectedOutlet, branches: contextBranches } = useOutlet();
+
   const [discrepancies, setDiscrepancies] = useState<Discrepancy[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDiscrepancy, setSelectedDiscrepancy] = useState<Discrepancy | null>(null);
@@ -61,10 +64,11 @@ export default function ReconciliationPage() {
   // Owner Approval Action
   const [approvalRunning, setApprovalRunning] = useState(false);
 
-  const fetchDiscrepancies = async () => {
+  const fetchDiscrepancies = async (outlet = selectedOutletCode) => {
     try {
       setLoading(true);
-      const res = await fetch("/api/reconciliation/discrepancies");
+      const branchParam = outlet && outlet !== "ALL" ? `?branchId=${outlet}` : "";
+      const res = await fetch(`/api/reconciliation/discrepancies${branchParam}`);
       if (res.ok) {
         const data = await res.json();
         setDiscrepancies(data.discrepancies || []);
@@ -77,8 +81,9 @@ export default function ReconciliationPage() {
   };
 
   useEffect(() => {
-    fetchDiscrepancies();
-  }, []);
+    setSelectedDiscrepancy(null);
+    fetchDiscrepancies(selectedOutletCode);
+  }, [selectedOutletCode]);
 
   const handleOpenDetail = (disc: Discrepancy) => {
     setSelectedDiscrepancy(disc);

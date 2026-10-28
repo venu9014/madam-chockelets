@@ -27,8 +27,16 @@ const DEMO_PERSONAS = [
     email: "employee.rahul@madamchocolate.com",
     name: "Rahul Verma",
     title: "Senior Display & Pastry Artisan",
-    badge: "Checklists & Attendance",
+    badge: "Checklists & Attendance (IND)",
     color: "border-cream-border bg-white",
+  },
+  {
+    role: "EMPLOYEE",
+    email: "employee.whitefield@madamchocolate.com",
+    name: "Whitefield Test Employee",
+    title: "Tasting Salon & Pastry Artisan",
+    badge: "Whitefield Salon & Tasting Room",
+    color: "border-gold-300 bg-gold-50/20",
   },
   {
     role: "AUDITOR",
@@ -103,8 +111,8 @@ export default function LoginPage() {
           MC
         </div>
 
-        <h1 className="text-3xl font-serif font-black text-plum tracking-tight">
-          MADAM CHOCOLATE
+        <h1 className="text-3xl font-bold text-plum tracking-tight">
+          Madam Chockelets
         </h1>
         <p className="text-xs uppercase tracking-widest text-gold-700 font-bold mt-1">
           Digital Operations Platform &bull; Staff Portal
@@ -116,7 +124,7 @@ export default function LoginPage() {
         <div className="bg-white py-6 px-6 sm:px-8 shadow-luxury-lg rounded-2xl border border-gold-300/80 mb-6">
           <div className="flex items-center gap-2 mb-3 pb-2 border-b border-cream-border">
             <Sparkles className="w-4 h-4 text-gold-600" />
-            <h2 className="font-serif font-bold text-sm text-plum">
+            <h2 className="font-bold text-sm text-plum">
               Instant 1-Click Demo Personas
             </h2>
           </div>

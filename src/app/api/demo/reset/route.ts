@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { ROLES } from "@/lib/constants";
 import { exec } from "child_process";
 import util from "util";
@@ -35,6 +35,10 @@ export async function POST(req: NextRequest) {
       details: stdout,
     });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Demo reset error:", error);
     return NextResponse.json({ error: "Failed to reset demo dataset." }, { status: 500 });
   }

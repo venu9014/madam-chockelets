@@ -143,19 +143,36 @@ export const PERMISSIONS = {
   canManageUsers: (role: UserRole) => role === ROLES.OWNER,
   canManageSops: (role: UserRole) => role === ROLES.OWNER,
   canApproveAdjustments: (role: UserRole) => role === ROLES.OWNER,
-  canReviewTasks: (role: UserRole) => role === ROLES.OWNER || role === ROLES.BRANCH_MANAGER,
-  canReviewAttendanceExceptions: (role: UserRole) =>
-    role === ROLES.OWNER || role === ROLES.BRANCH_MANAGER,
+  canReviewTasks: (role: UserRole) => role === ROLES.BRANCH_MANAGER,
+  canReviewAttendanceExceptions: (role: UserRole) => role === ROLES.BRANCH_MANAGER,
   canInitiateTransfers: (role: UserRole) =>
     role === ROLES.OWNER || role === ROLES.BRANCH_MANAGER,
   canConductStockCount: (role: UserRole) =>
-    role === ROLES.OWNER || role === ROLES.BRANCH_MANAGER || role === ROLES.EMPLOYEE,
+    role === ROLES.BRANCH_MANAGER || role === ROLES.EMPLOYEE,
   canInvestigateDiscrepancies: (role: UserRole) =>
     role === ROLES.OWNER || role === ROLES.BRANCH_MANAGER,
   canSubmitTasks: (role: UserRole) =>
     role === ROLES.EMPLOYEE || role === ROLES.BRANCH_MANAGER,
   canPerformAttendance: (role: UserRole) =>
-    role === ROLES.EMPLOYEE || role === ROLES.BRANCH_MANAGER,
+    role === ROLES.EMPLOYEE || role === ROLES.BRANCH_MANAGER || role === ROLES.AUDITOR,
+  isAttendanceExempt: (role: UserRole) => role === ROLES.OWNER,
   canImportData: (role: UserRole) => role === ROLES.OWNER || role === ROLES.BRANCH_MANAGER,
   isReadOnly: (role: UserRole) => role === ROLES.AUDITOR,
 };
+
+/**
+ * Checks if an error is an authentication or authorization failure
+ * and returns the appropriate HTTP status response.
+ */
+export function getAuthErrorResponse(error: unknown): { error: string; status: number } | null {
+  if (error instanceof Error) {
+    if (error.message.startsWith("UNAUTHORIZED")) {
+      return { error: error.message, status: 401 };
+    }
+    if (error.message.startsWith("FORBIDDEN")) {
+      return { error: error.message, status: 403 };
+    }
+  }
+  return null;
+}
+

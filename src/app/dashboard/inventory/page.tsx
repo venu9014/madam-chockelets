@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useOutlet } from "@/context/OutletContext";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
   Boxes,
@@ -41,14 +43,38 @@ interface ProductSummary {
   currentStock: number;
 }
 
+const CATEGORY_META: Record<
+  string,
+  { label: string; color: string; hex: string; bgLight: string; border: string }
+> = {
+  CAKES_PASTRIES: { label: "Cakes & Pastries", color: "bg-[#8B1E3F]", hex: "#8B1E3F", bgLight: "bg-[#8B1E3F]/10", border: "border-[#8B1E3F]/30" },
+  CHOCOLATES_TRUFFLES: { label: "Chocolates & Truffles", color: "bg-[#4A1525]", hex: "#4A1525", bgLight: "bg-[#4A1525]/10", border: "border-[#4A1525]/30" },
+  COOKIES_BISCUITS: { label: "Cookies & Biscuits", color: "bg-[#C6A45B]", hex: "#C6A45B", bgLight: "bg-[#C6A45B]/15", border: "border-[#C6A45B]/40" },
+  CUPCAKES_MUFFINS: { label: "Cupcakes & Muffins", color: "bg-[#A0522D]", hex: "#A0522D", bgLight: "bg-[#A0522D]/10", border: "border-[#A0522D]/30" },
+  BREADS_BUNS: { label: "Breads & Buns", color: "bg-[#D27D2D]", hex: "#D27D2D", bgLight: "bg-[#D27D2D]/10", border: "border-[#D27D2D]/30" },
+  DONUTS: { label: "Donuts", color: "bg-[#9B4F96]", hex: "#9B4F96", bgLight: "bg-[#9B4F96]/10", border: "border-[#9B4F96]/30" },
+  BROWNIES_BARS: { label: "Brownies & Bars", color: "bg-[#3D2314]", hex: "#3D2314", bgLight: "bg-[#3D2314]/10", border: "border-[#3D2314]/30" },
+  PUFFS_SAVOURIES: { label: "Puffs & Savouries", color: "bg-[#D97706]", hex: "#D97706", bgLight: "bg-[#D97706]/10", border: "border-[#D97706]/30" },
+  INGREDIENTS_PACKAGING: { label: "Ingredients", color: "bg-[#475569]", hex: "#475569", bgLight: "bg-[#475569]/10", border: "border-[#475569]/30" },
+};
+
 export default function InventoryPage() {
-  const searchParams = useSearchParams();
-  const initialBranch = searchParams.get("branchId") || "ALL";
+  const {
+    selectedOutletCode,
+    selectedOutletId,
+    selectedOutlet,
+    branches: contextBranches,
+    setOutletId,
+    user,
+  } = useOutlet();
 
   const [movements, setMovements] = useState<MovementRecord[]>([]);
   const [products, setProducts] = useState<ProductSummary[]>([]);
+  const [categoryBreakdown, setCategoryBreakdown] = useState<
+    Array<{ category: string; productCount: number; totalUnits: number; totalValue: number }>
+  >([]);
+  const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [branchFilter, setBranchFilter] = useState(initialBranch);
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -69,17 +95,25 @@ export default function InventoryPage() {
   const [transferQty, setTransferQty] = useState("5");
   const [transferNotes, setTransferNotes] = useState("");
 
-  const fetchData = async () => {
+  const fetchData = async (outlet = selectedOutletCode) => {
     try {
       setLoading(true);
+      const branchParam = outlet && outlet !== "ALL" ? `&branchId=${outlet}` : "";
+      const statsBranchParam = outlet && outlet !== "ALL" ? `?branchId=${outlet}` : "";
       const [movRes, prodRes] = await Promise.all([
-        fetch(`/api/inventory/movements?branchId=${branchFilter}&movementType=${typeFilter}&limit=100`),
-        fetch("/api/dashboard/stats"),
+        fetch(`/api/inventory/movements?movementType=${typeFilter}&limit=100${branchParam}`),
+        fetch(`/api/dashboard/stats${statsBranchParam}`),
       ]);
 
       if (movRes.ok) {
         const movData = await movRes.json();
         setMovements(movData.movements || []);
+      }
+
+      if (prodRes.ok) {
+        const statsData = await prodRes.json();
+        setCategoryBreakdown(statsData.categoryBreakdown || []);
+        setSummary(statsData.summary || null);
       }
     } catch (err) {
       console.error("Failed to load inventory:", err);
@@ -89,8 +123,31 @@ export default function InventoryPage() {
   };
 
   useEffect(() => {
-    fetchData();
-  }, [branchFilter, typeFilter]);
+    if (user?.role !== "EMPLOYEE") {
+      fetchData(selectedOutletCode);
+    }
+  }, [selectedOutletCode, typeFilter, user?.role]);
+
+  // Restrict ordinary employees from viewing stock balances and movements
+  if (user?.role === "EMPLOYEE") {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-center p-8 bg-white rounded-xl border border-cream-border shadow-luxury animate-in fade-in-50">
+        <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center text-red-600 mb-4 border border-red-200">
+          <ShieldCheck className="w-7 h-7" />
+        </div>
+        <h2 className="text-xl font-serif font-black text-plum">Access Restricted</h2>
+        <p className="text-xs text-cocoa/80 mt-2 max-w-md leading-relaxed">
+          Inventory valuations, stock balances, and material movements are restricted to Atelier Managers, Quality Auditors, and Executive Owners.
+        </p>
+        <Link
+          href="/dashboard/tasks"
+          className="mt-6 px-4 py-2 rounded-lg bg-plum text-gold-200 text-xs font-semibold hover:bg-plum/90 transition-colors shadow-sm"
+        >
+          Return to My Daily Checklist
+        </Link>
+      </div>
+    );
+  }
 
   const handleCreateMovement = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,6 +254,68 @@ export default function InventoryPage() {
           </button>
         </div>
       </div>
+
+      {/* Category Stock Level Visual Strip */}
+      {categoryBreakdown.length > 0 && (
+        <div className="bg-white rounded-xl border border-cream-border p-4 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="p-1 rounded bg-gold-100 text-gold-900 border border-gold-300">
+                <Boxes className="w-3.5 h-3.5 text-gold-700" />
+              </span>
+              <span className="font-serif font-bold text-xs text-plum">
+                Live Category Stock Levels & Confectionery Valuation
+              </span>
+            </div>
+            {summary && (
+              <div className="flex items-center gap-2 text-[11px] text-neutralMuted">
+                <span className="text-emerald-700 font-semibold">
+                  ● Stock Safety: {summary.lowStockProducts === 0 ? "100% Healthy" : `${summary.lowStockProducts} Low Stock`}
+                </span>
+                <span>&bull;</span>
+                <span className="text-rose-700 font-semibold">
+                  ● Anomalies: {summary.negativeStockProducts || 0}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
+            {categoryBreakdown.map((cat) => {
+              const meta = CATEGORY_META[cat.category] || {
+                label: cat.category.replace(/_/g, " "),
+                color: "bg-gold-500",
+                hex: "#C6A45B",
+                bgLight: "bg-gold-50/50",
+                border: "border-gold-200",
+              };
+              return (
+                <div
+                  key={cat.category}
+                  className={`p-2 rounded-lg border ${meta.border} ${meta.bgLight} flex flex-col justify-between`}
+                >
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className={`w-2 h-2 rounded-full ${meta.color} shrink-0`} />
+                      <span className="font-serif font-bold text-[11px] text-plum truncate">
+                        {meta.label}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-neutralMuted block font-mono">
+                      {cat.totalUnits} units
+                    </span>
+                  </div>
+                  <div className="mt-2 pt-1 border-t border-cream-border/60">
+                    <span className="font-serif font-bold text-xs text-plum block">
+                      ₹{cat.totalValue.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Filter Strip */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-cream-border shadow-sm">
@@ -343,6 +462,7 @@ export default function InventoryPage() {
                   <option value="IND">Indiranagar Boutique & Atelier</option>
                   <option value="KOR">Koramangala Flagship Confectionery</option>
                   <option value="WHF">Whitefield Salon & Tasting Room</option>
+                  <option value="MHD">Mahadevapura Boutique</option>
                 </select>
               </div>
 
@@ -445,6 +565,7 @@ export default function InventoryPage() {
                     <option value="IND">Indiranagar</option>
                     <option value="KOR">Koramangala</option>
                     <option value="WHF">Whitefield</option>
+                    <option value="MHD">Mahadevapura</option>
                   </select>
                 </div>
                 <div>
@@ -457,6 +578,7 @@ export default function InventoryPage() {
                     <option value="KOR">Koramangala</option>
                     <option value="IND">Indiranagar</option>
                     <option value="WHF">Whitefield</option>
+                    <option value="MHD">Mahadevapura</option>
                   </select>
                 </div>
               </div>

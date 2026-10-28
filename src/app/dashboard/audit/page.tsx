@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useOutlet } from "@/context/OutletContext";
 import { ShieldCheck, Search, Filter, Terminal, User, Building2, Calendar } from "lucide-react";
 import clsx from "clsx";
 
@@ -18,15 +19,18 @@ interface AuditEvent {
 }
 
 export default function AuditPage() {
+  const { selectedOutletCode, selectedOutletId, selectedOutlet } = useOutlet();
+
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
 
-  const fetchAuditLogs = async () => {
+  const fetchAuditLogs = async (outlet = selectedOutletCode) => {
     try {
       setLoading(true);
-      const res = await fetch("/api/audit?limit=100");
+      const branchParam = outlet && outlet !== "ALL" ? `&branchId=${outlet}` : "";
+      const res = await fetch(`/api/audit?limit=100${branchParam}`);
       if (res.ok) {
         const data = await res.json();
         setEvents(data.auditEvents || []);
@@ -39,8 +43,9 @@ export default function AuditPage() {
   };
 
   useEffect(() => {
-    fetchAuditLogs();
-  }, []);
+    setSelectedEvent(null);
+    fetchAuditLogs(selectedOutletCode);
+  }, [selectedOutletCode]);
 
   const filteredEvents = events.filter((e) => {
     if (!searchTerm) return true;

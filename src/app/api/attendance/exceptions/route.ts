@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { ROLES } from "@/lib/constants";
 import { recordAuditEvent } from "@/lib/audit";
 
@@ -9,27 +9,55 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   try {
     const user = await requireAuth();
+
+    // Owner accounts are strictly exempt from attendance operations
+    if (user.role === ROLES.OWNER) {
+      return NextResponse.json(
+        { error: "Owner accounts are strictly exempt from attendance exception management." },
+        { status: 403 }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
 
-    let branchId = searchParams.get("branchId");
+    const requestedBranchId = searchParams.get("branchId") || req.cookies.get("mc_selected_outlet")?.value;
     const status = searchParams.get("status");
-
-    if (user.role === ROLES.BRANCH_MANAGER) {
-      branchId = user.branchId || null;
-    }
 
     const whereClause: Record<string, unknown> = {};
 
-    if (branchId && branchId !== "ALL") {
-      whereClause.branchId = branchId;
+    if (user.role === ROLES.EMPLOYEE) {
+      let empId = user.employeeId;
+      if (!empId) {
+        const emp = await prisma.employee.findFirst({ where: { userId: user.id } });
+        empId = emp?.id || null;
+      }
+      whereClause.employeeId = empId || "NONE";
+    } else if (user.role === ROLES.BRANCH_MANAGER) {
+      whereClause.branchId = user.branchId || "NONE";
+    } else if (requestedBranchId && requestedBranchId !== "ALL") {
+      const foundBranch = await prisma.branch.findFirst({
+        where: {
+          OR: [{ id: requestedBranchId }, { code: requestedBranchId.toUpperCase() }],
+        },
+      });
+      whereClause.branchId = foundBranch ? foundBranch.id : requestedBranchId;
     }
 
     if (status && status !== "ALL") {
       whereClause.status = status;
     }
 
-    if (user.role === ROLES.EMPLOYEE && user.employeeId) {
-      whereClause.employeeId = user.employeeId;
+    const includeFormer = searchParams.get("includeFormer") === "true";
+    if (!includeFormer) {
+      whereClause.employee = {
+        active: true,
+        employmentStatus: "ACTIVE",
+        user: { active: true, role: { not: ROLES.OWNER } },
+      };
+    } else {
+      whereClause.employee = {
+        user: { role: { not: ROLES.OWNER } },
+      };
     }
 
     const exceptions = await prisma.attendanceException.findMany({
@@ -49,14 +77,19 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ exceptions });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Attendance exceptions GET error:", error);
     return NextResponse.json({ error: "Failed to fetch attendance exceptions." }, { status: 500 });
   }
 }
 
+
 export async function PUT(req: NextRequest) {
   try {
-    const user = await requireAuth([ROLES.OWNER, ROLES.BRANCH_MANAGER]);
+    const user = await requireAuth([ROLES.BRANCH_MANAGER]);
     const body = await req.json();
     const { exceptionId, status, reviewerNotes } = body;
 
@@ -127,7 +160,12 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ success: true, exception: updated });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Attendance exception review error:", error);
     return NextResponse.json({ error: "Failed to update exception." }, { status: 500 });
   }
 }
+

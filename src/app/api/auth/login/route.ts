@@ -79,6 +79,17 @@ export async function POST(req: NextRequest) {
       path: "/",
     });
 
+    // If user has an assigned branch, set mc_selected_outlet cookie to avoid carrying over previous user's outlet
+    if (user.employee?.branch?.code) {
+      response.cookies.set({
+        name: "mc_selected_outlet",
+        value: user.employee.branch.code,
+        path: "/",
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60,
+      });
+    }
+
     return response;
   } catch (error) {
     console.error("Login route error:", error);

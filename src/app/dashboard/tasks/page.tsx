@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+import { useOutlet } from "@/context/OutletContext";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import {
   CheckSquare,
@@ -77,6 +78,8 @@ interface TaskItem {
 }
 
 export default function TasksPage() {
+  const { selectedOutletCode, selectedOutletId, selectedOutlet, branches: contextBranches } = useOutlet();
+
   const searchParams = useSearchParams();
   const initialTaskId = searchParams.get("id");
   const initialStatus = searchParams.get("status") || "ALL";
@@ -95,10 +98,11 @@ export default function TasksPage() {
   const [reviewComments, setReviewComments] = useState("");
   const [reviewActionRunning, setReviewActionRunning] = useState(false);
 
-  const fetchTasks = async () => {
+  const fetchTasks = async (outlet = selectedOutletCode) => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/tasks?status=${statusFilter}`);
+      const branchParam = outlet && outlet !== "ALL" ? `&branchId=${outlet}` : "";
+      const res = await fetch(`/api/tasks?status=${statusFilter}${branchParam}`);
       if (res.ok) {
         const data = await res.json();
         setTasks(data.tasks || []);
@@ -116,8 +120,8 @@ export default function TasksPage() {
   };
 
   useEffect(() => {
-    fetchTasks();
-  }, [statusFilter]);
+    fetchTasks(selectedOutletCode);
+  }, [statusFilter, selectedOutletCode]);
 
   const handleSelectTask = (task: TaskItem) => {
     setSelectedTask(task);

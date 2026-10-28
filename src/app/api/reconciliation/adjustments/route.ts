@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { ROLES } from "@/lib/constants";
 import { recordAuditEvent } from "@/lib/audit";
 
@@ -8,17 +8,21 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireAuth();
+    const user = await requireAuth([ROLES.OWNER, ROLES.BRANCH_MANAGER, ROLES.AUDITOR]);
     const { searchParams } = new URL(req.url);
 
-    let branchId = searchParams.get("branchId");
-    if (user.role === ROLES.BRANCH_MANAGER) {
-      branchId = user.branchId || null;
-    }
-
+    const requestedBranchId = searchParams.get("branchId") || req.cookies.get("mc_selected_outlet")?.value;
     const whereClause: Record<string, unknown> = {};
-    if (branchId && branchId !== "ALL") {
-      whereClause.branchId = branchId;
+
+    if (user.role === ROLES.BRANCH_MANAGER) {
+      whereClause.branchId = user.branchId || "NONE";
+    } else if (requestedBranchId && requestedBranchId !== "ALL") {
+      const foundBranch = await prisma.branch.findFirst({
+        where: {
+          OR: [{ id: requestedBranchId }, { code: requestedBranchId.toUpperCase() }],
+        },
+      });
+      whereClause.branchId = foundBranch ? foundBranch.id : requestedBranchId;
     }
 
     const adjustments = await prisma.stockAdjustmentRequest.findMany({
@@ -35,10 +39,15 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ adjustments });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Adjustments GET error:", error);
     return NextResponse.json({ error: "Failed to fetch adjustment requests." }, { status: 500 });
   }
 }
+
 
 export async function POST(req: NextRequest) {
   try {
@@ -51,7 +60,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required adjustment parameters." }, { status: 400 });
     }
 
-    if (user.role === ROLES.BRANCH_MANAGER && user.branchId !== branchId) {
+    let resolvedBranchId = branchId;
+    const foundBranch = await prisma.branch.findFirst({
+      where: { OR: [{ id: branchId }, { code: branchId.toUpperCase() }] },
+    });
+    if (foundBranch) {
+      resolvedBranchId = foundBranch.id;
+    }
+
+    if (user.role === ROLES.BRANCH_MANAGER && user.branchId !== resolvedBranchId) {
       return NextResponse.json({ error: "Unauthorized for this branch." }, { status: 403 });
     }
 
@@ -72,7 +89,7 @@ export async function POST(req: NextRequest) {
         data: {
           requestNumber,
           discrepancyId: discrepancyId || null,
-          branchId,
+          branchId: resolvedBranchId,
           productId,
           proposedQuantity,
           unitCost,
@@ -93,7 +110,7 @@ export async function POST(req: NextRequest) {
       // Notify owner of pending adjustment approval
       await tx.notification.create({
         data: {
-          branchId,
+          branchId: resolvedBranchId,
           title: "Stock Adjustment Pending Approval",
           message: `Request #${requestNumber} for ${proposedQuantity} units of ${product.name} (Value: ₹${adjustmentValue}) requires approval.`,
           category: "INVENTORY",
@@ -112,16 +129,21 @@ export async function POST(req: NextRequest) {
       action: "STOCK_ADJUSTMENT_REQUESTED",
       entityType: "INVENTORY",
       entityId: adjustment.id,
-      branchId,
+      branchId: resolvedBranchId,
       metadata: { requestNumber, proposedQuantity, adjustmentValue, reason },
     });
 
     return NextResponse.json({ success: true, adjustment });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Adjustments POST error:", error);
     return NextResponse.json({ error: "Failed to request adjustment." }, { status: 500 });
   }
 }
+
 
 // Approve or Reject Stock Adjustment Request (Owner Only!)
 export async function PUT(req: NextRequest) {
@@ -223,7 +245,12 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ success: true, adjustment: result });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Adjustments PUT error:", error);
     return NextResponse.json({ error: "Failed to process adjustment approval." }, { status: 500 });
   }
 }
+

@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "MADAM CHOCOLATE — Digital Operations Platform",
+  title: "Madam Chockelets — Digital Operations Platform",
   description:
-    "Centralized digital operations system for Madam Chocolate multi-branch luxury confectionery, inventory ledger, SOP adherence, and staff governance.",
+    "Centralized digital operations system for Madam Chockelets multi-branch luxury confectionery, inventory ledger, SOP adherence, and staff governance.",
 };
 
 export default function RootLayout({

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { ROLES } from "@/lib/constants";
 import { recordAuditEvent } from "@/lib/audit";
 
@@ -8,17 +8,23 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireAuth();
+    const user = await requireAuth([ROLES.OWNER, ROLES.BRANCH_MANAGER, ROLES.AUDITOR]);
     const { searchParams } = new URL(req.url);
 
-    let branchId = searchParams.get("branchId");
-    if (user.role === ROLES.BRANCH_MANAGER) {
-      branchId = user.branchId || null;
-    }
-
+    const requestedBranchId = searchParams.get("branchId") || req.cookies.get("mc_selected_outlet")?.value;
     const whereClause: Record<string, unknown> = {};
-    if (branchId && branchId !== "ALL") {
-      whereClause.OR = [{ sourceBranchId: branchId }, { targetBranchId: branchId }];
+
+    if (user.role === ROLES.BRANCH_MANAGER) {
+      const bId = user.branchId || "NONE";
+      whereClause.OR = [{ sourceBranchId: bId }, { targetBranchId: bId }];
+    } else if (requestedBranchId && requestedBranchId !== "ALL") {
+      const foundBranch = await prisma.branch.findFirst({
+        where: {
+          OR: [{ id: requestedBranchId }, { code: requestedBranchId.toUpperCase() }],
+        },
+      });
+      const resolvedId = foundBranch ? foundBranch.id : requestedBranchId;
+      whereClause.OR = [{ sourceBranchId: resolvedId }, { targetBranchId: resolvedId }];
     }
 
     const transfers = await prisma.stockTransfer.findMany({
@@ -39,10 +45,15 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ transfers });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Transfers GET error:", error);
     return NextResponse.json({ error: "Failed to fetch stock transfers." }, { status: 500 });
   }
 }
+
 
 export async function POST(req: NextRequest) {
   try {
@@ -55,11 +66,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Source, target, and at least one item required." }, { status: 400 });
     }
 
-    if (sourceBranchId === targetBranchId) {
+    let resolvedSourceBranchId = sourceBranchId;
+    let resolvedTargetBranchId = targetBranchId;
+
+    const [sourceB, targetB] = await Promise.all([
+      prisma.branch.findFirst({ where: { OR: [{ id: sourceBranchId }, { code: sourceBranchId.toUpperCase() }] } }),
+      prisma.branch.findFirst({ where: { OR: [{ id: targetBranchId }, { code: targetBranchId.toUpperCase() }] } }),
+    ]);
+
+    if (sourceB) resolvedSourceBranchId = sourceB.id;
+    if (targetB) resolvedTargetBranchId = targetB.id;
+
+    if (resolvedSourceBranchId === resolvedTargetBranchId) {
       return NextResponse.json({ error: "Source and target branch cannot be the same." }, { status: 400 });
     }
 
-    if (user.role === ROLES.BRANCH_MANAGER && user.branchId !== sourceBranchId) {
+    if (user.role === ROLES.BRANCH_MANAGER && user.branchId !== resolvedSourceBranchId) {
       return NextResponse.json({ error: "Managers can only dispatch transfers from their assigned branch." }, { status: 403 });
     }
 
@@ -69,8 +91,8 @@ export async function POST(req: NextRequest) {
       const tr = await tx.stockTransfer.create({
         data: {
           transferNumber,
-          sourceBranchId,
-          targetBranchId,
+          sourceBranchId: resolvedSourceBranchId,
+          targetBranchId: resolvedTargetBranchId,
           status: "IN_TRANSIT",
           notes: notes || null,
           initiatedById: user.id,
@@ -95,7 +117,7 @@ export async function POST(req: NextRequest) {
         await tx.inventoryMovement.create({
           data: {
             productId: item.productId,
-            branchId: sourceBranchId,
+            branchId: resolvedSourceBranchId,
             movementType: "TRANSFER_OUT",
             quantity: -Math.abs(item.quantity),
             unitCost: prod.costPrice,
@@ -135,6 +157,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, transfer });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Transfers POST error:", error);
     return NextResponse.json({ error: "Failed to create transfer." }, { status: 500 });
   }
@@ -211,7 +237,12 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ success: true, transfer: updated });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Transfers PUT error:", error);
     return NextResponse.json({ error: "Failed to confirm transfer receipt." }, { status: 500 });
   }
 }
+

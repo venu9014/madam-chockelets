@@ -33,8 +33,15 @@ const DEMO_PERSONAS = [
     role: "EMPLOYEE",
     email: "employee.rahul@madamchocolate.com",
     name: "Rahul Verma",
-    label: "Employee",
+    label: "Employee (IND)",
     scope: "Display & Tasks (IND)",
+  },
+  {
+    role: "EMPLOYEE",
+    email: "employee.whitefield@madamchocolate.com",
+    name: "Whitefield Employee",
+    label: "Employee (WHF)",
+    scope: "Whitefield Salon & Tasting Room",
   },
   {
     role: "AUDITOR",

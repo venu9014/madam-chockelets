@@ -3,16 +3,17 @@ import { prisma } from "../../src/lib/prisma";
 import { recordAuditEvent } from "../../src/lib/audit";
 
 describe("Database Workflows Integration Tests", () => {
-  it("should have seeded the 3 Bengaluru branches", async () => {
+  it("should have seeded the Bengaluru branches including Mahadevapura", async () => {
     const branches = await prisma.branch.findMany({
       where: { active: true },
     });
-    expect(branches.length).toBe(3);
+    expect(branches.length).toBeGreaterThanOrEqual(3);
 
     const codes = branches.map((b) => b.code);
     expect(codes).toContain("IND");
     expect(codes).toContain("KOR");
     expect(codes).toContain("WHF");
+    expect(codes).toContain("MHD");
   });
 
   it("should have seeded products with positive cost and selling prices", async () => {

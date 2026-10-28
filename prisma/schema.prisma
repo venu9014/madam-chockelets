@@ -40,6 +40,7 @@ model User {
   auditEvents          AuditEvent[]
   notifications        Notification[]
   importJobs           ImportJob[]
+  cleanlinessInspections FloorCleanlinessInspection[]
 
   @@index([role])
   @@index([email])
@@ -56,6 +57,16 @@ model Branch {
   latitude             Float
   longitude            Float
   geofenceRadiusMeters Float     @default(150.0) // 150m standard geofence boundary
+  maxGpsAccuracyMeters Float     @default(50.0)  // 50m acceptable accuracy threshold
+  maxLocationAgeSeconds Int      @default(60)    // 60s freshness threshold
+  geofenceType         String    @default("CIRCLE") // CIRCLE, POLYGON
+  geofencePolygonJson  String?   // JSON string array of { lat, lng } points
+  wifiVerificationPolicy String  @default("GPS_AND_WIFI") // GPS_AND_WIFI, GPS_ONLY, WIFI_ONLY, GPS_OR_WIFI
+  wifiSsid             String?   @default("Moto G85 5G")
+  wifiBssid            String?
+  requireBssidVerification Boolean @default(false)
+  secondaryBssids      String?   // JSON string array of additional approved BSSIDs
+  wifiSecretKey        String?   @default("mc-workplace-secret-2026")
   active               Boolean   @default(true)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
@@ -64,6 +75,9 @@ model Branch {
   tasks                Task[]
   attendanceEvents     AttendanceEvent[]
   attendanceExceptions AttendanceException[]
+  attendanceSessions   AttendanceSession[]
+  networkChallenges    NetworkChallengeLog[]
+  cleanlinessInspections FloorCleanlinessInspection[]
   inventoryMovements   InventoryMovement[]
   sourceTransfers      StockTransfer[]    @relation("SourceBranch")
   targetTransfers      StockTransfer[]    @relation("TargetBranch")
@@ -84,6 +98,9 @@ model Employee {
   joinedDate       DateTime
   emergencyContact String?
   active           Boolean   @default(true)
+  employmentStatus String    @default("ACTIVE") // ACTIVE, INACTIVE, RESIGNED, TERMINATED
+  resignedAt       DateTime?
+  terminatedAt     DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -92,6 +109,8 @@ model Employee {
   tasks            Task[]
   attendanceEvents AttendanceEvent[]
   attendanceExceptions AttendanceException[]
+  attendanceSessions AttendanceSession[]
+  networkChallenges NetworkChallengeLog[]
 
   @@index([branchId])
   @@index([employeeCode])
@@ -309,6 +328,71 @@ model AttendanceException {
 
   @@index([branchId, status])
   @@index([status])
+}
+
+model AttendanceSession {
+  id                    String    @id @default(cuid())
+  employeeId            String
+  branchId              String
+  punchInTime           DateTime  @default(now())
+  punchOutTime          DateTime?
+  durationMinutes       Int?
+  status                String    @default("OPEN") // OPEN, COMPLETED, FLAGGED, REJECTED
+  
+  // Punch In verification metadata
+  inLatitude            Float?
+  inLongitude           Float?
+  inAccuracyMeters      Float?
+  inDistanceMeters      Float?
+  inGpsVerified         Boolean   @default(false)
+  inGeofenceType        String?   @default("CIRCLE") // CIRCLE, POLYGON
+  inWifiSsid            String?
+  inWifiBssid           String?
+  inWifiVerified        Boolean   @default(false)
+  inVerificationMethod  String    @default("GPS_AND_WIFI") // GPS_ONLY, WIFI_ONLY, GPS_AND_WIFI, MANUAL_OVERRIDE
+  
+  // Punch Out verification metadata
+  outLatitude           Float?
+  outLongitude          Float?
+  outAccuracyMeters     Float?
+  outDistanceMeters     Float?
+  outGpsVerified        Boolean?
+  outGeofenceType       String?
+  outWifiSsid           String?
+  outWifiBssid          String?
+  outWifiVerified       Boolean?
+  
+  // Device & Diagnostic metadata
+  deviceDetails         String?
+  notes                 String?
+  isSimulated           Boolean   @default(false)
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  employee              Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branch                Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, status])
+  @@index([branchId, punchInTime])
+}
+
+model NetworkChallengeLog {
+  id             String    @id @default(cuid())
+  challengeToken String    @unique
+  nonce          String    @unique
+  branchId       String
+  employeeId     String
+  status         String    @default("ISSUED") // ISSUED, CONSUMED, EXPIRED, REPLAYED
+  issuedAt       DateTime  @default(now())
+  expiresAt      DateTime
+  consumedAt     DateTime?
+
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branch         Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([branchId, status])
+  @@index([nonce])
 }
 
 // -------------------------------------------------------------
@@ -592,3 +676,32 @@ model AppConfig {
 
   @@index([configKey])
 }
+
+// -------------------------------------------------------------
+// FLOOR CLEANLINESS & HYGIENE INSPECTIONS
+// -------------------------------------------------------------
+
+model FloorCleanlinessInspection {
+  id               String   @id @default(cuid())
+  branchId         String
+  inspectorId      String
+  zone             String   @default("KITCHEN") // KITCHEN, SERVICE_COUNTER, DISPLAY_AREA, PACKAGING_STATION, ENTRANCE
+  imageUrl         String
+  fileName         String?
+  cleanlinessScore Int      // 0 - 100
+  status           String   // PASSED, NEEDS_ATTENTION, REJECTED_BLURRY, REJECTED_DARK, REJECTED_UNSUPPORTED
+  visibleDebris    Boolean  @default(false)
+  debrisNotes      String?
+  disclaimer       String   @default("Visual surface cleanliness assessment only. This inspection detects visible dirt, flour, and debris; it does not test for invisible pathogens or verify microbiological sterilization.")
+  analysisDetails  String?  // JSON string with brightness, blurScore, coverageScore, contrast
+  notes            String?
+  inspectedAt      DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  branch           Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  inspector        User     @relation(fields: [inspectorId], references: [id])
+
+  @@index([branchId, inspectedAt])
+  @@index([status])
+}
+

@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
+import { useOutlet } from "@/context/OutletContext";
+import { OutletSelector } from "./OutletSelector";
 import {
   LayoutDashboard,
   FileText,
@@ -14,7 +16,10 @@ import {
   ShieldCheck,
   FileSpreadsheet,
   Package,
+  Sparkles,
   Settings,
+  Building2,
+  Users,
   Menu,
   X,
   ExternalLink,
@@ -41,13 +46,19 @@ const NAV_ITEMS = [
     label: "Tasks & Checklists",
     href: "/dashboard/tasks",
     icon: CheckSquare,
-    roles: ["OWNER", "BRANCH_MANAGER", "EMPLOYEE", "AUDITOR"],
+    roles: ["BRANCH_MANAGER", "EMPLOYEE", "AUDITOR"],
   },
   {
     label: "Staff Attendance",
     href: "/dashboard/attendance",
     icon: Clock,
-    roles: ["OWNER", "BRANCH_MANAGER", "EMPLOYEE", "AUDITOR"],
+    roles: ["BRANCH_MANAGER", "EMPLOYEE", "AUDITOR"],
+  },
+  {
+    label: "Employee Management",
+    href: "/dashboard/employees",
+    icon: Users,
+    roles: ["OWNER", "BRANCH_MANAGER", "AUDITOR"],
   },
   {
     label: "Inventory Movements",
@@ -74,26 +85,51 @@ const NAV_ITEMS = [
     roles: ["OWNER", "BRANCH_MANAGER"],
   },
   {
-    label: "Confectionery Catalogue",
+    label: "Floor Cleanliness",
+    href: "/dashboard/cleanliness",
+    icon: Sparkles,
+    roles: ["BRANCH_MANAGER", "EMPLOYEE", "AUDITOR"],
+  },
+  {
+    label: "Product Catalog",
     href: "/dashboard/products",
     icon: Package,
     roles: ["OWNER", "BRANCH_MANAGER", "EMPLOYEE", "AUDITOR"],
   },
   {
-    label: "System & Demo Reset",
+    label: "Outlets & Boutiques",
+    href: "/dashboard/outlets",
+    icon: Building2,
+    roles: ["OWNER", "BRANCH_MANAGER", "AUDITOR"],
+  },
+  {
+    label: "Workplace & System Settings",
     href: "/dashboard/settings",
     icon: Settings,
-    roles: ["OWNER", "BRANCH_MANAGER", "EMPLOYEE", "AUDITOR"],
+    roles: ["OWNER", "BRANCH_MANAGER"],
   },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ userRole = "OWNER" }) => {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { selectedOutletCode } = useOutlet();
 
   const filteredItems = NAV_ITEMS.filter((item) =>
     item.roles.includes(userRole.toUpperCase())
-  );
+  ).map((item) => {
+    if (item.href === "/dashboard" && userRole.toUpperCase() === "EMPLOYEE") {
+      return { ...item, label: "My Workspace" };
+    }
+    return item;
+  });
+
+  const getHref = (baseHref: string) => {
+    if (selectedOutletCode && selectedOutletCode !== "ALL") {
+      return `${baseHref}?branchId=${selectedOutletCode}`;
+    }
+    return baseHref;
+  };
 
   return (
     <>
@@ -125,6 +161,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ userRole = "OWNER" }) => {
       >
         {/* Navigation List */}
         <div className="flex-1 py-4 px-3 overflow-y-auto space-y-1">
+          {/* Mobile Outlet Selector */}
+          <div className="lg:hidden mb-3 px-1">
+            <OutletSelector className="w-full" />
+          </div>
+
           <div className="px-3 mb-2">
             <span className="text-[10px] font-bold uppercase tracking-widest text-gold-400">
               Operations Control
@@ -140,7 +181,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ userRole = "OWNER" }) => {
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={getHref(item.href)}
                 onClick={() => setMobileOpen(false)}
                 className={clsx(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all group",

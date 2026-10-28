@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { ROLES } from "@/lib/constants";
 import { recordAuditEvent } from "@/lib/audit";
 
@@ -9,7 +9,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const user = await requireAuth([ROLES.EMPLOYEE, ROLES.BRANCH_MANAGER, ROLES.OWNER]);
+    const user = await requireAuth([ROLES.EMPLOYEE, ROLES.BRANCH_MANAGER]);
     const taskId = params.id;
     const body = await req.json();
     const { notes, answers = [], evidenceUrl, evidenceCaption } = body;
@@ -29,6 +29,19 @@ export async function POST(
     // Branch authorization check
     if (user.role === ROLES.EMPLOYEE && user.branchId && user.branchId !== task.branchId) {
       return NextResponse.json({ error: "Unauthorized for this branch task." }, { status: 403 });
+    }
+
+    // Strict assigned employee check: Employee cannot submit tasks assigned to another employee
+    if (
+      user.role === ROLES.EMPLOYEE &&
+      task.assignedEmployeeId &&
+      user.employeeId &&
+      task.assignedEmployeeId !== user.employeeId
+    ) {
+      return NextResponse.json(
+        { error: "Forbidden: You cannot submit a task assigned to another employee." },
+        { status: 403 }
+      );
     }
 
     const submissionSeq = task.submissions.length + 1;
@@ -114,6 +127,10 @@ export async function POST(
 
     return NextResponse.json({ success: true, submission: result.submission });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Task submission error:", error);
     return NextResponse.json({ error: "Failed to submit task." }, { status: 500 });
   }

@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { evaluateAttendanceGeofence } from "@/lib/geofence";
+import { evaluateWorkplaceWifi } from "@/lib/wifi-verifier";
 import { recordAuditEvent } from "@/lib/audit";
 
 export async function POST(req: NextRequest) {
   try {
     const user = await requireAuth();
+
+    // Owner accounts are strictly exempt from attendance tracking
+    if (user.role === "OWNER") {
+      return NextResponse.json(
+        { error: "Owner accounts are strictly exempt from employee attendance tracking." },
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
 
     const {
@@ -15,121 +25,395 @@ export async function POST(req: NextRequest) {
       latitude,
       longitude,
       accuracyMeters,
+      locationTimestamp,
+      wifiSsid,
+      wifiBssid,
+      challengeToken,
       isSimulated = false,
       simulationScenario,
       notes,
     } = body;
 
-    const branchId = targetBranchId || user.branchId;
-    if (!branchId) {
-      return NextResponse.json({ error: "Branch ID required for attendance check." }, { status: 400 });
-    }
+    const action = eventType === "CHECK_OUT" ? "CHECK_OUT" : "CHECK_IN";
 
-    const branch = await prisma.branch.findUnique({
-      where: { id: branchId },
+    // 1. Resolve employee record strictly from authenticated user
+    let employeeId = user.employeeId;
+    let employee = await prisma.employee.findFirst({
+      where: employeeId ? { id: employeeId } : { userId: user.id },
+      include: {
+        branch: true,
+        user: { select: { name: true, email: true } },
+      },
     });
 
-    if (!branch) {
-      return NextResponse.json({ error: "Branch not found." }, { status: 404 });
+    if (!employee) {
+      const defaultBranch = await prisma.branch.findFirst({ where: { active: true } });
+      if (defaultBranch) {
+        employee = await prisma.employee.create({
+          data: {
+            userId: user.id,
+            branchId: defaultBranch.id,
+            employeeCode: `MC-${user.role.slice(0, 3)}-${Date.now().toString().slice(-4)}`,
+            designation: `${user.role} Operations`,
+            joinedDate: new Date(),
+          },
+          include: {
+            branch: true,
+            user: { select: { name: true, email: true } },
+          },
+        });
+      }
     }
 
-    // Server-side Geofence Evaluation
+    if (!employee || !employee.active) {
+      return NextResponse.json(
+        { error: "No active employee record associated with this account." },
+        { status: 403 }
+      );
+    }
+
+    // Resolve target workplace branch
+    const requestedBranchParam = targetBranchId || req.cookies.get("mc_selected_outlet")?.value;
+    let branch = employee.branch;
+
+    if (requestedBranchParam && requestedBranchParam !== "ALL") {
+      const foundBranch = await prisma.branch.findFirst({
+        where: {
+          active: true,
+          OR: [{ id: requestedBranchParam }, { code: requestedBranchParam.toUpperCase() }],
+        },
+      });
+
+      if (foundBranch) {
+        if (user.role === "BRANCH_MANAGER" && user.branchId && user.branchId !== foundBranch.id && user.branchCode !== foundBranch.code) {
+          return NextResponse.json(
+            { error: `Forbidden: As Branch Manager, you may only check in at your assigned boutique (${employee.branch.name}).` },
+            { status: 403 }
+          );
+        }
+        branch = foundBranch;
+      }
+    }
+
+    if (!branch || !branch.active) {
+      return NextResponse.json(
+        { error: "Workplace boutique is inactive or not found." },
+        { status: 400 }
+      );
+    }
+
+    // 2. Prevent duplicate check-ins or invalid check-outs
+    const existingOpenSession = await prisma.attendanceSession.findFirst({
+      where: {
+        employeeId: employee.id,
+        status: "OPEN",
+      },
+      orderBy: { punchInTime: "desc" },
+    });
+
+    if (action === "CHECK_IN" && existingOpenSession) {
+      return NextResponse.json(
+        {
+          error: "An attendance session is already open. You must punch out before starting a new session.",
+          existingSessionId: existingOpenSession.id,
+          punchInTime: existingOpenSession.punchInTime,
+        },
+        { status: 409 }
+      );
+    }
+
+    if (action === "CHECK_OUT" && !existingOpenSession) {
+      return NextResponse.json(
+        { error: "No active attendance session found to check out. Please check in first." },
+        { status: 400 }
+      );
+    }
+
+    // 3. Server-side Geofence Evaluation
     const geofenceResult = evaluateAttendanceGeofence({
       deviceLat: latitude,
       deviceLon: longitude,
       accuracyMeters,
+      locationTimestamp,
       branchLat: branch.latitude,
       branchLon: branch.longitude,
       geofenceRadiusMeters: branch.geofenceRadiusMeters,
+      maxAcceptableAccuracyMeters: branch.maxGpsAccuracyMeters,
+      geofenceType: (branch.geofenceType as any) || "CIRCLE",
+      polygonPointsJson: branch.geofencePolygonJson,
+      maxLocationAgeSeconds: branch.maxLocationAgeSeconds || 60,
     });
 
-    let employeeId = user.employeeId;
-    if (!employeeId) {
-      // Find employee record
-      const emp = await prisma.employee.findFirst({
-        where: { userId: user.id },
-      });
-      employeeId = emp?.id || null;
+    // 4. Server-side Workplace Wi-Fi Verification
+    const wifiResult = await evaluateWorkplaceWifi({
+      policy: branch.wifiVerificationPolicy,
+      branchSsid: branch.wifiSsid,
+      branchBssid: branch.wifiBssid,
+      branchSecretKey: branch.wifiSecretKey,
+      clientSsid: wifiSsid,
+      clientBssid: wifiBssid,
+      challengeToken,
+      branchId: branch.id,
+      employeeId: employee.id,
+      isSimulated: Boolean(isSimulated),
+      requireBssidVerification: branch.requireBssidVerification ?? false,
+      secondaryBssids: branch.secondaryBssids,
+    });
+
+    // 5. Enforce Verification Policy
+    // 5. Evaluate GPS and Wi-Fi independently
+    const policy = branch.wifiVerificationPolicy; // "GPS_AND_WIFI" | "GPS_ONLY" | "WIFI_ONLY" | "GPS_OR_WIFI"
+
+    let gpsStatus: "Verified" | "Outside Geofence" | "Accuracy Insufficient" = "Verified";
+    let gpsError: string | null = null;
+    if (!geofenceResult.isWithinGeofence) {
+      if (geofenceResult.status === "POOR_ACCURACY") {
+        gpsStatus = "Accuracy Insufficient";
+        gpsError = "Location Accuracy Insufficient — GPS accuracy is insufficient to determine whether the device is inside the boundary.";
+      } else {
+        gpsStatus = "Outside Geofence";
+        gpsError = geofenceResult.description;
+      }
     }
 
-    if (!employeeId) {
-      return NextResponse.json({ error: "No employee record associated with this account." }, { status: 400 });
+    let wifiStatus: "Verified" | "Not Verified" | "Unavailable" = "Verified";
+    let wifiError: string | null = null;
+    if (!wifiResult.isWifiVerified) {
+      if (wifiResult.status === "DISCONNECTED_WIFI") {
+        wifiStatus = "Unavailable";
+      } else {
+        wifiStatus = "Not Verified";
+      }
+      wifiError = "Wi-Fi Not Verified — You are not connected to the authorized workplace Wi-Fi network.";
     }
 
-    let status = "VERIFIED";
-    if (geofenceResult.requiresException) {
-      status = "PENDING_EXCEPTION";
+    let isVerificationSuccess = false;
+    const failureReasons: string[] = [];
+
+    if (policy === "GPS_AND_WIFI") {
+      if (gpsError) failureReasons.push(gpsError);
+      if (wifiError) failureReasons.push(wifiError);
+      isVerificationSuccess = !gpsError && !wifiError;
+    } else if (policy === "GPS_ONLY") {
+      if (gpsError) failureReasons.push(gpsError);
+      isVerificationSuccess = !gpsError;
+    } else if (policy === "WIFI_ONLY") {
+      if (wifiError) failureReasons.push(wifiError);
+      isVerificationSuccess = !wifiError;
+    } else if (policy === "GPS_OR_WIFI") {
+      if (gpsError && wifiError) {
+        failureReasons.push(gpsError);
+        failureReasons.push(wifiError);
+        isVerificationSuccess = false;
+      } else {
+        isVerificationSuccess = true;
+      }
     }
 
-    const attendanceEvent = await prisma.$transaction(async (tx) => {
-      const event = await tx.attendanceEvent.create({
-        data: {
-          employeeId: employeeId!,
-          branchId: branch.id,
-          eventType,
-          latitude: latitude || null,
-          longitude: longitude || null,
-          distanceFromBranchMeters: geofenceResult.distanceMeters >= 0 ? geofenceResult.distanceMeters : null,
-          isWithinGeofence: geofenceResult.isWithinGeofence,
-          accuracyMeters: accuracyMeters || null,
-          status,
-          isSimulated: Boolean(isSimulated),
-          simulationScenario: simulationScenario || (isSimulated ? "SIMULATED_ATTENDANCE" : null),
-          notes: notes || geofenceResult.description,
+    // Strict validation: Reject if checks fail
+    if (!isVerificationSuccess) {
+      const combinedReason = failureReasons.join(" \n");
+
+      await recordAuditEvent({
+        actorId: user.id,
+        actorName: user.name,
+        actorRole: user.role,
+        action: `ATTENDANCE_${action}_REJECTED`,
+        entityType: "ATTENDANCE",
+        branchId: branch.id,
+        metadata: {
+          action,
+          failureReason: combinedReason,
+          failureReasons,
+          gpsStatus,
+          wifiStatus,
+          distanceMeters: geofenceResult.distanceMeters,
+          accuracyMeters,
+          wifiSsid,
+          policy,
         },
       });
 
-      // If outside geofence, create AttendanceException automatically
-      if (status === "PENDING_EXCEPTION") {
-        await tx.attendanceException.create({
+      return NextResponse.json(
+        {
+          error: combinedReason || "Attendance verification failed.",
+          errors: {
+            gps: gpsError,
+            wifi: wifiError,
+          },
+          statuses: {
+            gpsLocation: gpsStatus,
+            workplaceWifi: wifiStatus,
+            overallAttendance: "Rejected",
+          },
+          failureReasons,
+          diagnostic: {
+            action,
+            gps: geofenceResult,
+            wifi: wifiResult,
+            policy,
+          },
+        },
+        { status: 422 }
+      );
+    }
+
+    const serverNow = new Date();
+
+    // 6. Execute atomic database transaction
+    const { event, session } = await prisma.$transaction(async (tx) => {
+      let createdSession;
+
+      if (action === "CHECK_IN") {
+        // Concurrency check inside transaction
+        const inTxOpen = await tx.attendanceSession.findFirst({
+          where: { employeeId: employee.id, status: "OPEN" },
+        });
+        if (inTxOpen) {
+          throw new Error("CONFLICT_CONCURRENT_SESSION: An attendance session is already open.");
+        }
+
+        createdSession = await tx.attendanceSession.create({
           data: {
-            attendanceEventId: event.id,
-            employeeId: employeeId!,
+            employeeId: employee.id,
             branchId: branch.id,
-            reason: notes || `Outside geofence (${geofenceResult.distanceMeters}m). Exception review required.`,
-            status: "PENDING",
+            punchInTime: serverNow,
+            status: "OPEN",
+            inLatitude: latitude || null,
+            inLongitude: longitude || null,
+            inAccuracyMeters: accuracyMeters || null,
+            inDistanceMeters: geofenceResult.distanceMeters >= 0 ? geofenceResult.distanceMeters : null,
+            inGpsVerified: geofenceResult.isWithinGeofence,
+            inGeofenceType: branch.geofenceType || "CIRCLE",
+            inWifiSsid: wifiSsid || branch.wifiSsid,
+            inWifiBssid: wifiBssid || null,
+            inWifiVerified: wifiResult.isWifiVerified,
+            inVerificationMethod: policy,
+            deviceDetails: "Attendance Checkin API",
+            notes: notes || null,
+            isSimulated: Boolean(isSimulated),
           },
         });
 
-        // Notify branch manager
-        await tx.notification.create({
+        const createdEvent = await tx.attendanceEvent.create({
           data: {
+            employeeId: employee.id,
             branchId: branch.id,
-            title: "Attendance Exception Flagged",
-            message: `${user.name} checked in outside geofence (${geofenceResult.distanceMeters}m away). Reason: ${notes || "Unspecified"}`,
-            category: "ATTENDANCE",
-            type: "WARNING",
-            linkUrl: `/dashboard/attendance`,
+            eventType: "CHECK_IN",
+            timestamp: serverNow,
+            latitude: latitude || null,
+            longitude: longitude || null,
+            distanceFromBranchMeters: geofenceResult.distanceMeters >= 0 ? geofenceResult.distanceMeters : null,
+            isWithinGeofence: geofenceResult.isWithinGeofence,
+            accuracyMeters: accuracyMeters || null,
+            status: "VERIFIED",
+            isSimulated: Boolean(isSimulated),
+            simulationScenario: simulationScenario || null,
+            notes: notes || `Check-in verified via ${policy}. ${wifiResult.message}`,
           },
         });
+
+        return { event: createdEvent, session: createdSession };
+      } else {
+        // CHECK_OUT
+        const inTxSession = await tx.attendanceSession.findFirst({
+          where: { id: existingOpenSession!.id, status: "OPEN" },
+        });
+        if (!inTxSession) {
+          throw new Error("CONFLICT_ALREADY_CLOSED: This attendance session has already been closed.");
+        }
+
+        const punchInMs = new Date(inTxSession.punchInTime).getTime();
+        const durationMinutes = Math.max(0, Math.round((serverNow.getTime() - punchInMs) / 60000));
+
+        createdSession = await tx.attendanceSession.update({
+          where: { id: inTxSession.id },
+          data: {
+            punchOutTime: serverNow,
+            durationMinutes,
+            status: "COMPLETED",
+            outLatitude: latitude || null,
+            outLongitude: longitude || null,
+            outAccuracyMeters: accuracyMeters || null,
+            outDistanceMeters: geofenceResult.distanceMeters >= 0 ? geofenceResult.distanceMeters : null,
+            outGpsVerified: geofenceResult.isWithinGeofence,
+            outGeofenceType: branch.geofenceType || "CIRCLE",
+            outWifiSsid: wifiSsid || branch.wifiSsid,
+            outWifiBssid: wifiBssid || null,
+            outWifiVerified: wifiResult.isWifiVerified,
+          },
+        });
+
+        const createdEvent = await tx.attendanceEvent.create({
+          data: {
+            employeeId: employee.id,
+            branchId: branch.id,
+            eventType: "CHECK_OUT",
+            timestamp: serverNow,
+            latitude: latitude || null,
+            longitude: longitude || null,
+            distanceFromBranchMeters: geofenceResult.distanceMeters >= 0 ? geofenceResult.distanceMeters : null,
+            isWithinGeofence: geofenceResult.isWithinGeofence,
+            accuracyMeters: accuracyMeters || null,
+            status: "VERIFIED",
+            isSimulated: Boolean(isSimulated),
+            simulationScenario: simulationScenario || null,
+            notes: `Checked out. Duration: ${durationMinutes} minutes.`,
+          },
+        });
+
+        return { event: createdEvent, session: createdSession };
       }
-
-      return event;
     });
 
+    // 7. Audit Logging
     await recordAuditEvent({
       actorId: user.id,
       actorName: user.name,
       actorRole: user.role,
-      action: `ATTENDANCE_${eventType}`,
+      action: `ATTENDANCE_${action}`,
       entityType: "ATTENDANCE",
-      entityId: attendanceEvent.id,
+      entityId: session.id,
       branchId: branch.id,
       metadata: {
-        eventType,
-        isWithinGeofence: geofenceResult.isWithinGeofence,
+        action,
+        sessionId: session.id,
         distanceMeters: geofenceResult.distanceMeters,
-        status,
-        isSimulated,
+        accuracyMeters,
+        isWithinGeofence: geofenceResult.isWithinGeofence,
+        wifiVerified: wifiResult.isWifiVerified,
+        policy,
       },
     });
 
     return NextResponse.json({
       success: true,
-      attendanceEvent,
-      geofence: geofenceResult,
+      action,
+      attendanceEvent: event,
+      session,
+      diagnostic: {
+        gps: geofenceResult,
+        wifi: wifiResult,
+        policy,
+      },
     });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
+    if (error instanceof Error && error.message.startsWith("CONFLICT_CONCURRENT_SESSION")) {
+      return NextResponse.json(
+        { error: "An attendance session is already open. You must punch out before starting a new session." },
+        { status: 409 }
+      );
+    }
+    if (error instanceof Error && error.message.startsWith("CONFLICT_ALREADY_CLOSED")) {
+      return NextResponse.json(
+        { error: "This attendance session has already been closed." },
+        { status: 409 }
+      );
+    }
     console.error("Attendance checkin error:", error);
     return NextResponse.json({ error: "Failed to process attendance." }, { status: 500 });
   }

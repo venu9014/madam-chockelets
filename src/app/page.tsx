@@ -58,6 +58,12 @@ export default function PublicShowcasePage() {
       time: "10:00 AM – 10:00 PM",
       phone: "+91 80 4125 0003",
     },
+    {
+      name: "Mahadevapura Boutique",
+      address: "Outer Ring Road, Mahadevapura, Bengaluru",
+      time: "10:00 AM – 10:30 PM",
+      phone: "+91 80 4125 0004",
+    },
   ];
 
   return (
@@ -66,7 +72,7 @@ export default function PublicShowcasePage() {
       <div className="bg-plum text-cream-muted text-center py-2 px-4 text-xs border-b border-gold-500/30 flex items-center justify-center gap-3">
         <span className="inline-flex items-center gap-1.5 text-gold-300 font-semibold tracking-wider text-[11px] uppercase">
           <Sparkles className="w-3.5 h-3.5 text-gold-400" />
-          The Madam Chocolate Autumn Confectionery Edit
+          The Madam Chockelets Autumn Confectionery Edit
         </span>
         <span className="hidden sm:inline">&bull;</span>
         <Link
@@ -85,8 +91,8 @@ export default function PublicShowcasePage() {
             MC
           </div>
           <div>
-            <span className="font-serif font-black text-plum tracking-wider text-lg block leading-none">
-              MADAM CHOCOLATE
+            <span className="font-bold text-plum tracking-wide text-lg block leading-none">
+              Madam Chockelets
             </span>
             <span className="text-[10px] uppercase tracking-widest text-gold-700 font-semibold block mt-0.5">
               Atelier & Boutiques
@@ -151,7 +157,7 @@ export default function PublicShowcasePage() {
           <div className="relative rounded-3xl overflow-hidden border-2 border-gold-400 shadow-luxury-lg bg-plum-dark aspect-[4/3]">
             <img
               src="https://images.unsplash.com/photo-1541781774459-bb2af2f05b55?w=800"
-              alt="Madam Chocolate Artisan Truffles"
+              alt="Madam Chockelets Artisan Truffles"
               className="w-full h-full object-cover opacity-90"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-plum via-transparent to-transparent opacity-80" />
@@ -178,8 +184,8 @@ export default function PublicShowcasePage() {
             <span className="text-xs font-bold uppercase tracking-widest text-gold-700 block mb-1">
               Curated Masterpieces
             </span>
-            <h2 className="text-3xl sm:text-4xl font-serif font-black text-plum">
-              The Madam Confectionery Collections
+            <h2 className="text-3xl sm:text-4xl font-bold text-plum">
+              The Madam Chockelets Confectionery Collections
             </h2>
             <p className="text-xs text-cocoa/80 mt-2">
               Each confection follows rigorous temperature standards, fresh cream infusions, and certified fair-trade Indian cacao farming.
@@ -277,8 +283,8 @@ export default function PublicShowcasePage() {
               MC
             </div>
             <div>
-              <span className="font-serif font-bold text-white text-sm block">
-                MADAM CHOCOLATE
+              <span className="font-bold text-white text-sm block">
+                Madam Chockelets
               </span>
               <span className="text-[10px] text-gold-400">
                 Digital Operations &amp; Retail Confectionery Platform
@@ -299,7 +305,7 @@ export default function PublicShowcasePage() {
           </div>
 
           <p className="text-[11px] text-neutralMuted">
-            &copy; 2026 MADAM CHOCOLATE. All Rights Reserved. Fictional Demonstration System.
+            &copy; 2026 Madam Chockelets. All Rights Reserved. Fictional Demonstration System.
           </p>
         </div>
       </footer>

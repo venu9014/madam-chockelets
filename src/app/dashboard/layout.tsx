@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { BrandHeader } from "@/components/ui/BrandHeader";
 import { Sidebar } from "@/components/ui/Sidebar";
 import { DemoBanner } from "@/components/ui/DemoBanner";
+import { OutletProvider } from "@/context/OutletContext";
 
 export default async function DashboardLayout({
   children,
@@ -17,23 +18,25 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-cream flex flex-col font-sans">
-      {/* Top Demo Banner */}
-      <DemoBanner currentUser={user} />
+    <OutletProvider initialUser={user}>
+      <div className="min-h-screen bg-cream flex flex-col font-sans">
+        {/* Top Demo Banner */}
+        <DemoBanner currentUser={user} />
 
-      {/* Main Header */}
-      <BrandHeader user={user} />
+        {/* Main Header */}
+        <BrandHeader user={user} />
 
-      {/* Body Layout */}
-      <div className="flex-1 flex">
-        <Sidebar userRole={user.role} />
+        {/* Body Layout */}
+        <div className="flex-1 flex">
+          <Sidebar userRole={user.role} />
 
-        <main className="flex-1 lg:pl-64 flex flex-col">
-          <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
-            {children}
-          </div>
-        </main>
+          <main className="flex-1 lg:pl-64 flex flex-col">
+            <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+              {children}
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
+    </OutletProvider>
   );
 }

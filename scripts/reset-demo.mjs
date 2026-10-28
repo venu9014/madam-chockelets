@@ -23,6 +23,8 @@ async function resetDemo() {
   await prisma.stockTransferItem.deleteMany();
   await prisma.stockTransfer.deleteMany();
   await prisma.inventoryMovement.deleteMany();
+  await prisma.networkChallengeLog.deleteMany();
+  await prisma.attendanceSession.deleteMany();
   await prisma.attendanceException.deleteMany();
   await prisma.attendanceEvent.deleteMany();
   await prisma.evidenceAttachment.deleteMany();
@@ -33,6 +35,7 @@ async function resetDemo() {
   await prisma.sopChecklistItem.deleteMany();
   await prisma.sopVersion.deleteMany();
   await prisma.sop.deleteMany();
+  await prisma.floorCleanlinessInspection.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.user.deleteMany();
   await prisma.branch.deleteMany();

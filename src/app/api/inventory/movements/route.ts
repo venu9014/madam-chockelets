@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { ROLES, INVENTORY_MOVEMENT_TYPES, MOVEMENT_SIGN_MULTIPLIER } from "@/lib/constants";
 import { recordAuditEvent } from "@/lib/audit";
 
@@ -11,19 +11,30 @@ export async function GET(req: NextRequest) {
     const user = await requireAuth();
     const { searchParams } = new URL(req.url);
 
-    let branchId = searchParams.get("branchId");
+    let branchId = searchParams.get("branchId") || req.cookies.get("mc_selected_outlet")?.value;
     const productId = searchParams.get("productId");
     const movementType = searchParams.get("movementType");
     const limit = parseInt(searchParams.get("limit") || "50", 10);
 
+    // Enforce Requirement 6: Stock & inventory hidden from Employee
+    if (user.role === ROLES.EMPLOYEE) {
+      return NextResponse.json(
+        { error: "Forbidden: Employee role is not authorized to access inventory records." },
+        { status: 403 }
+      );
+    }
+
     if (user.role === ROLES.BRANCH_MANAGER) {
-      branchId = user.branchId || null;
+      branchId = user.branchId || "NONE";
     }
 
     const whereClause: Record<string, unknown> = {};
 
     if (branchId && branchId !== "ALL") {
-      whereClause.branchId = branchId;
+      const foundBranch = await prisma.branch.findFirst({
+        where: { OR: [{ id: branchId }, { code: branchId.toUpperCase() }] },
+      });
+      whereClause.branchId = foundBranch ? foundBranch.id : branchId;
     }
 
     if (productId && productId !== "ALL") {
@@ -46,6 +57,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ movements });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Movements GET error:", error);
     return NextResponse.json({ error: "Failed to fetch inventory movements." }, { status: 500 });
   }
@@ -62,7 +77,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required movement fields." }, { status: 400 });
     }
 
-    if (user.role === ROLES.BRANCH_MANAGER && user.branchId !== branchId) {
+    const foundBranch = await prisma.branch.findFirst({
+      where: { OR: [{ id: branchId }, { code: branchId.toUpperCase() }] },
+    });
+    if (!foundBranch) {
+      return NextResponse.json({ error: "Branch not found." }, { status: 404 });
+    }
+    const resolvedBranchId = foundBranch.id;
+
+    if (user.role === ROLES.BRANCH_MANAGER && user.branchId !== resolvedBranchId && user.branchCode !== foundBranch.code) {
       return NextResponse.json({ error: "Unauthorized for another branch." }, { status: 403 });
     }
 
@@ -81,7 +104,7 @@ export async function POST(req: NextRequest) {
     const movement = await prisma.inventoryMovement.create({
       data: {
         productId,
-        branchId,
+        branchId: resolvedBranchId,
         movementType,
         quantity: signedQuantity,
         unitCost: product.costPrice,
@@ -113,6 +136,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, movement });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Movements POST error:", error);
     return NextResponse.json({ error: "Failed to record stock movement." }, { status: 500 });
   }

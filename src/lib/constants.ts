@@ -113,3 +113,12 @@ export const DEMO_USERS = [
     badge: "Audit & Oversight (Read-Only)",
   },
 ];
+
+export {
+  BAKERY_CATEGORIES,
+  VALID_BAKERY_CATEGORY_IDS,
+  DEFAULT_AUTHORIZED_SSID,
+  isValidBakeryCategory,
+  getBakeryCategoryLabel,
+} from "./bakery-categories";
+

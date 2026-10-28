@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { ROLES } from "@/lib/constants";
 import { recordAuditEvent } from "@/lib/audit";
 
@@ -8,20 +8,23 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const user = await requireAuth();
+    const user = await requireAuth([ROLES.OWNER, ROLES.BRANCH_MANAGER, ROLES.AUDITOR]);
     const { searchParams } = new URL(req.url);
 
-    let branchId = searchParams.get("branchId");
+    const requestedBranchId = searchParams.get("branchId") || req.cookies.get("mc_selected_outlet")?.value;
     const status = searchParams.get("status");
-
-    if (user.role === ROLES.BRANCH_MANAGER) {
-      branchId = user.branchId || null;
-    }
 
     const whereClause: Record<string, unknown> = {};
 
-    if (branchId && branchId !== "ALL") {
-      whereClause.branchId = branchId;
+    if (user.role === ROLES.BRANCH_MANAGER) {
+      whereClause.branchId = user.branchId || "NONE";
+    } else if (requestedBranchId && requestedBranchId !== "ALL") {
+      const foundBranch = await prisma.branch.findFirst({
+        where: {
+          OR: [{ id: requestedBranchId }, { code: requestedBranchId.toUpperCase() }],
+        },
+      });
+      whereClause.branchId = foundBranch ? foundBranch.id : requestedBranchId;
     }
 
     if (status && status !== "ALL") {
@@ -45,6 +48,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ discrepancies });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Discrepancies GET error:", error);
     return NextResponse.json({ error: "Failed to fetch discrepancies." }, { status: 500 });
   }
@@ -95,7 +102,12 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ success: true, discrepancy: updated });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("Discrepancies PUT error:", error);
     return NextResponse.json({ error: "Failed to update discrepancy notes." }, { status: 500 });
   }
 }
+

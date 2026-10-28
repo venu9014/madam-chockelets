@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getAuthErrorResponse } from "@/lib/auth";
 import { ROLES } from "@/lib/constants";
 import Papa from "papaparse";
 import { recordAuditEvent } from "@/lib/audit";
@@ -193,6 +193,10 @@ export async function POST(req: NextRequest) {
       validationErrors,
     });
   } catch (error) {
+    const authErr = getAuthErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.error }, { status: authErr.status });
+    }
     console.error("CSV Import error:", error);
     return NextResponse.json({ error: "Failed to process CSV import." }, { status: 500 });
   }

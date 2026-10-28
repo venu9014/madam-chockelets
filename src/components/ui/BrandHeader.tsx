@@ -2,10 +2,12 @@
 
 import React from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { NotificationDropdown } from "./NotificationDropdown";
+import { OutletSelector } from "./OutletSelector";
 import { Building2, LogOut, ChevronDown, UserCheck } from "lucide-react";
 import clsx from "clsx";
+import { useOutlet } from "@/context/OutletContext";
 
 interface BrandHeaderProps {
   user: {
@@ -21,20 +23,7 @@ interface BrandHeaderProps {
 
 export const BrandHeader: React.FC<BrandHeaderProps> = ({ user }) => {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  const currentBranch = searchParams.get("branchId") || (user?.role === "BRANCH_MANAGER" ? user.branchId : "ALL");
-
-  const handleBranchChange = (branchId: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (branchId === "ALL") {
-      params.delete("branchId");
-    } else {
-      params.set("branchId", branchId);
-    }
-    router.push(`${pathname}?${params.toString()}`);
-  };
+  const { selectedOutletCode, setOutletId, branches, loadingOutlets } = useOutlet();
 
   const handleLogout = async () => {
     try {
@@ -56,8 +45,8 @@ export const BrandHeader: React.FC<BrandHeaderProps> = ({ user }) => {
               MC
             </div>
             <div>
-              <span className="font-serif font-bold text-plum tracking-wider text-base block leading-none">
-                MADAM CHOCOLATE
+              <span className="font-bold text-plum tracking-wide text-base block leading-none">
+                Madam Chockelets
               </span>
               <span className="text-[10px] uppercase tracking-widest text-gold-700 font-semibold block mt-0.5">
                 Digital Operations
@@ -66,34 +55,9 @@ export const BrandHeader: React.FC<BrandHeaderProps> = ({ user }) => {
           </Link>
         </div>
 
-        {/* Center: Branch Scope Selector */}
-        <div className="hidden md:flex items-center gap-2">
-          {user?.role === "BRANCH_MANAGER" ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cream-muted border border-gold-300/60 text-xs">
-              <Building2 className="w-3.5 h-3.5 text-gold-700" />
-              <span className="text-neutralMuted font-medium">Branch:</span>
-              <span className="font-semibold text-plum">
-                {user.branchName || "Assigned Boutique"}
-              </span>
-              <span className="text-[10px] bg-gold-200 text-gold-900 px-1.5 py-0.5 rounded uppercase font-bold">
-                Assigned
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-gold-700" />
-              <select
-                value={currentBranch || "ALL"}
-                onChange={(e) => handleBranchChange(e.target.value)}
-                className="text-xs bg-cream-muted border border-gold-300/80 rounded-lg px-3 py-1.5 text-plum font-medium focus:outline-none focus:ring-1 focus:ring-gold-500 transition-all cursor-pointer"
-              >
-                <option value="ALL">All Branches (Consolidated Oversight)</option>
-                <option value="IND">Indiranagar Boutique & Atelier</option>
-                <option value="KOR">Koramangala Flagship Confectionery</option>
-                <option value="WHF">Whitefield Salon & Tasting Room</option>
-              </select>
-            </div>
-          )}
+        {/* Center: Authoritative Outlet Selector */}
+        <div className="flex items-center gap-2">
+          <OutletSelector />
         </div>
 
         {/* Right: Notifications & User Profile */}

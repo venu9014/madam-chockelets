@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useOutlet } from "@/context/OutletContext";
 import {
   FileSpreadsheet,
   Upload,
@@ -22,12 +23,19 @@ MC-PRAL-12,4,INV-POS-20261016-04,Corporate gift box order
 INVALID-SKU-99,10,INV-POS-20261016-05,Simulated validation error row`;
 
 export default function ImportsPage() {
+  const { selectedOutletCode, branches } = useOutlet();
   const [csvContent, setCsvContent] = useState("");
   const [jobType, setJobType] = useState("SALES_IMPORT");
   const [targetBranch, setTargetBranch] = useState("IND");
   const [running, setRunning] = useState(false);
   const [previewResult, setPreviewResult] = useState<any | null>(null);
   const [commitResult, setCommitResult] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (selectedOutletCode && selectedOutletCode !== "ALL") {
+      setTargetBranch(selectedOutletCode);
+    }
+  }, [selectedOutletCode]);
 
   const handleLoadSample = () => {
     setCsvContent(SAMPLE_SALES_CSV);
@@ -139,9 +147,20 @@ export default function ImportsPage() {
               onChange={(e) => setTargetBranch(e.target.value)}
               className="w-full p-2 bg-cream-muted border border-cream-border rounded-lg text-xs"
             >
-              <option value="IND">Indiranagar Boutique & Atelier</option>
-              <option value="KOR">Koramangala Flagship Confectionery</option>
-              <option value="WHF">Whitefield Salon & Tasting Room</option>
+              {branches.length > 0 ? (
+                branches.map((b) => (
+                  <option key={b.id || b.code} value={b.code}>
+                    {b.name} ({b.code})
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value="IND">Indiranagar Boutique & Atelier</option>
+                  <option value="KOR">Koramangala Flagship Confectionery</option>
+                  <option value="WHF">Whitefield Salon & Tasting Room</option>
+                  <option value="MHD">Mahadevapura</option>
+                </>
+              )}
             </select>
           </div>
         </div>
